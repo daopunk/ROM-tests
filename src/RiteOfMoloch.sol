@@ -2,10 +2,11 @@
 // @author st4rgard3n, bitbeckers, MrDeadce11 / Raid Guild
 pragma solidity ^0.8.4;
 
-import "lib/openzeppelin-contracts-upgradeable/contracts/access/AccessControlUpgradeable.sol";
 import "lib/openzeppelin-contracts-upgradeable/contracts/utils/CountersUpgradeable.sol";
 import "lib/openzeppelin-contracts-upgradeable/contracts/token/ERC721/ERC721Upgradeable.sol";
 import "./InitializationData.sol";
+import "./hats/HatsAccessControl.sol";
+import "./hats/IHats.sol";
 
 interface MolochDAO {
     struct Member {
@@ -17,7 +18,10 @@ interface MolochDAO {
         uint256 jailed; // set to proposalIndex of a passing guild kick proposal for this member, prevents voting on and sponsoring proposals
     }
 
-    function members(address memberAddress) external view returns (Member calldata member);
+    function members(address memberAddress)
+        external
+        view
+        returns (Member calldata member);
 }
 
 interface Token {
@@ -30,7 +34,11 @@ interface Token {
     function transfer(address to, uint256 amount) external returns (bool);
 }
 
-contract RiteOfMoloch is InitializationData, ERC721Upgradeable, AccessControlUpgradeable {
+contract RiteOfMoloch is
+    InitializationData,
+    ERC721Upgradeable,
+    HatsAccessControl
+{
     using CountersUpgradeable for CountersUpgradeable.Counter;
 
     // role constants
@@ -42,7 +50,13 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable, AccessControlUpg
      *************************/
 
     // logs new initiation data
-    event Initiation(address newInitiate, address benefactor, uint256 tokenId, uint256 stake, uint256 deadline);
+    event Initiation(
+        address newInitiate,
+        address benefactor,
+        uint256 tokenId,
+        uint256 stake,
+        uint256 deadline
+    );
 
     // logs data when failed initiates get slashed
     event Sacrifice(address sacrifice, uint256 slashedAmount, address slasher);
@@ -95,6 +109,12 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable, AccessControlUpg
     // DAO treasury address
     address public treasury;
 
+    // Hats vars:
+    IHats public Hats;
+    uint256 public topHat;
+    uint256 public adminHat;
+    uint256 public operatorHat;
+
     constructor() {
         _disableInitializers();
     }
@@ -106,14 +126,11 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable, AccessControlUpg
      */
     function initialize(
         InitData calldata initData,
+        address hatsProtocol,
         address caller_
-        ) external initializer {
-
+    ) external initializer {
         // increment the counter so our first sbt has token id of one
         _tokenIdCounter.increment();
-
-        // initialize access control
-        __AccessControl_init();
 
         // initialize the SBT
         __ERC721_init(initData.name, initData.symbol);
@@ -130,23 +147,74 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable, AccessControlUpg
         // Set the minimum shares
         minimumShare = initData.threshold;
 
-        // grant roles
-        _grantRole(DEFAULT_ADMIN_ROLE, caller_);
-        _grantRole(ADMIN, msg.sender);
-        _grantRole(OPERATOR, msg.sender);
+        // point to Hats Protocol
+        Hats = IHats(hatsProtocol);
 
-        // setup the ADMIN role to manage the OPERATOR role
-        _setRoleAdmin(OPERATOR, ADMIN);
+        // create/mint Hats
+        if (
+            initData.topHatWearer != address(0) &&
+            initData.topHatId != 0 &&
+            Hats.isWearerOfHat(initData.topHatWearer, initData.topHatId)
+        ) {
+            // todo: add logic for existing topHat
+            return;
+        } else {
+            topHat = Hats.mintTopHat(address(this), "ROM TopHat", "");
+        }
+
+        adminHat = Hats.createHat(
+            topHat,
+            "ROM Admin",
+            3,
+            address(this),
+            address(this),
+            true,
+            ""
+        );
+
+        Hats.mintHat(adminHat, caller_);
+
+        _grantRole(ADMIN, topHat);
+
+        // operatorHat = Hats.createHat(
+        //     adminHat,
+        //     "ROM Operator",
+        //     1,
+        //     initData.membershipCriteria,
+        //     initData.membershipCriteria,
+        //     true,
+        //     ""
+        // );
+
+        // // grant roles
+        // _grantRole(DEFAULT_ADMIN_ROLE, caller_);
+        // _grantRole(ADMIN, msg.sender);
+        // _grantRole(OPERATOR, msg.sender);
+
+        // // setup the ADMIN role to manage the OPERATOR role
+        // _setRoleAdmin(OPERATOR, ADMIN);
 
         // set the minimum stake requirement
-        setMinimumStake(initData.assetAmount);
+        // setMinimumStake(initData.assetAmount);
 
-        // set the cohort duration in seconds
-        setMaxDuration(initData.duration);
+        // // set the cohort duration in seconds
+        // setMaxDuration(initData.duration);
 
         // set the cohort token's base uri
-        _setBaseUri(initData.baseUri);
+        // _setBaseUri(initData.baseUri);
+    }
 
+    function adminTest(uint256 n) external onlyRole(ADMIN) returns (bool) {
+        if (n == 7) return true;
+        else false;
+    }
+
+    function checkTopHat() public returns (bool) {
+        return Hats.isWearerOfHat(address(this), topHat);
+    }
+
+    function checkAdminHat(address c) public returns (bool) {
+        return Hats.isWearerOfHat(c, adminHat);
     }
 
     /*************************
@@ -211,7 +279,7 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable, AccessControlUpg
     function cryForHelp(string calldata feedback) public {
         require(balanceOf(msg.sender) == 1, "Only cohort participants!");
 
-         emit Feedback(msg.sender, treasury, feedback);
+        emit Feedback(msg.sender, treasury, feedback);
     }
 
     /*************************
@@ -222,9 +290,13 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable, AccessControlUpg
      * @dev Allows DAO members to change the staking requirement
      * @param newMinimumStake the minimum quantity of tokens a user must stake to join the cohort
      */
-    function setMinimumStake(uint256 newMinimumStake) public onlyRole(ADMIN) {
+    // function setMinimumStake(uint256 newMinimumStake) public onlyRole(ADMIN) {
+    function setMinimumStake(uint256 newMinimumStake) public {
         // enforce that the minimum stake isn't zero
-        require(newMinimumStake > 0, "Minimum stake must be greater than zero!");
+        require(
+            newMinimumStake > 0,
+            "Minimum stake must be greater than zero!"
+        );
 
         // set the minimum staking requirement
         minimumStake = newMinimumStake;
@@ -237,7 +309,8 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable, AccessControlUpg
      * @dev Allows changing the maximum initiation duration
      * @param newMaxTime the length in seconds until an initiate's stake is forfeit
      */
-    function setMaxDuration(uint256 newMaxTime) public onlyRole(OPERATOR) {
+    // function setMaxDuration(uint256 newMaxTime) public onlyRole(OPERATOR) {
+    function setMaxDuration(uint256 newMaxTime) public {
         // enforce that the minimum time is greater than 1 week
         require(newMaxTime > 0, "Minimum duration must be greater than 0!");
 
@@ -252,9 +325,16 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable, AccessControlUpg
      * @dev Allows changing the DAO member share threshold
      * @param newShareThreshold the number of shares required to be considered a DAO member
      */
-    function setShareThreshold(uint256 newShareThreshold) public onlyRole(ADMIN) {
+    // function setShareThreshold(uint256 newShareThreshold)
+    //     public
+    //     onlyRole(ADMIN)
+    // {
+    function setShareThreshold(uint256 newShareThreshold) public {
         // enforce that the minimum share threshold isn't zero
-        require(newShareThreshold > 0, "Minimum shares must be greater than zero!");
+        require(
+            newShareThreshold > 0,
+            "Minimum shares must be greater than zero!"
+        );
 
         // set the minimum number of DAO shares required to graduate
         minimumShare = newShareThreshold;
@@ -321,12 +401,17 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable, AccessControlUpg
      * @param _user the recipient of the cohort SBT
      */
     function _soulBind(address _user) internal virtual {
-
         // store the current token counter
         uint256 tokenId = _tokenIdCounter.current();
 
         // log the initiation data
-        emit Initiation(_user, msg.sender, tokenId, minimumStake, deadlines[_user]);
+        emit Initiation(
+            _user,
+            msg.sender,
+            tokenId,
+            minimumStake,
+            deadlines[_user]
+        );
 
         // increment the token counter
         _tokenIdCounter.increment();
@@ -340,7 +425,6 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable, AccessControlUpg
      * @param _failedInitiates an array of user's who have failed to join the DAO
      */
     function _darkRitual(address[] calldata _failedInitiates) internal virtual {
-
         // the total amount of blood debt
         uint256 total;
 
@@ -352,7 +436,6 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable, AccessControlUpg
             uint256 deadline = deadlines[initiate];
 
             if (block.timestamp > deadline && _staked[initiate] > 0) {
-
                 // access each initiate's balance
                 uint256 balance = _staked[initiate];
 
@@ -367,14 +450,9 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable, AccessControlUpg
 
                 // remove the sacrifice's starting time
                 delete deadlines[initiate];
-            }
-
-            else {
-
+            } else {
                 continue;
-
             }
-
         }
 
         // drain the life force from the sacrifice
@@ -388,7 +466,6 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable, AccessControlUpg
      * @dev Authenticates users through the DAO contract
      */
     function _checkMember() internal virtual {
-
         // access membership data from the DAO
         MolochDAO.Member memory member = dao.members(msg.sender);
 
@@ -414,7 +491,6 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable, AccessControlUpg
      * @dev returns the user's member status
      */
     function isMember(address user) public view returns (bool memberStatus) {
-
         // access membership data from the DAO
         MolochDAO.Member memory member = dao.members(user);
 
@@ -423,9 +499,7 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable, AccessControlUpg
 
         if (shares >= minimumShare) {
             return true;
-        }
-
-        else {
+        } else {
             return false;
         }
     }
@@ -448,7 +522,12 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable, AccessControlUpg
     }
 
     // The following functions are overrides required by Solidity.
-    function supportsInterface(bytes4 interfaceId) public view override(ERC721Upgradeable, AccessControlUpgradeable) returns (bool) {
+    function supportsInterface(bytes4 interfaceId)
+        public
+        view
+        override(ERC721Upgradeable)
+        returns (bool)
+    {
         return super.supportsInterface(interfaceId);
     }
 }

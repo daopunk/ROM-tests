@@ -10,46 +10,46 @@ import "./utils/TestToken.sol";
 // forge test --match-contract TestHelper -vv
 
 contract TestHelper is Test, InitializationData {
-	address deployer = address(this);
-	TestToken public daoToken;
-	InitData Data;
+    address dao = address(this);
+    TestToken public daoToken;
+    InitData Data;
 
-	RiteOfMoloch public ROM;
-	RiteOfMolochFactory public ROMF;
+    RiteOfMoloch public ROM;
+    RiteOfMolochFactory public ROMF;
 
-	function setUp() public {
-		// set token to be staked
-		daoToken = new TestToken();
+    function setUp() public {
+        // set token to be staked
+        daoToken = new TestToken();
 
-		// deploy ROM factory
-		ROMF = new RiteOfMolochFactory();
+        // deploy ROM factory
+        ROMF = new RiteOfMolochFactory();
 
-		// set initial data for ROM clone
-		createInitData();
+        // set initial data for ROM clone
+        createInitData();
 
-		// deploy ROM clone
-		ROM = RiteOfMoloch(ROMF.createCohort(Data, 1));
-	}
+        // deploy ROM clone
+        ROM = RiteOfMoloch(ROMF.createCohort(Data, 1));
+    }
 
-	// create initial data
-	function createInitData() public {
-		Data.membershipCriteria = deployer;
-		Data.stakingAsset = address(daoToken);
-		Data.treasury = deployer;
-		Data.threshold = 10;
-		Data.assetAmount = 10;
-		Data.duration = 10;
-		Data.name = "RiteOfMolochSBT";
-		Data.symbol = "SBTMoloch";
-		Data.baseUri = "";
-	}
+    // create initial data
+    function createInitData() public {
+        Data.membershipCriteria = dao;
+        Data.stakingAsset = address(daoToken);
+        Data.treasury = dao;
+        Data.threshold = 10;
+        Data.assetAmount = 10;
+        Data.duration = 10;
+        Data.name = "RiteOfMolochSBT";
+        Data.symbol = "SBTMoloch";
+        Data.baseUri = "";
+    }
 
-	// log deployment information
-	function testCloneDeployment() public {
-		emit log_named_address("ROM Contract", address(ROM));
-		emit log_named_address("ROM Treasury", ROM.treasury());
-		emit log_named_uint("min share", ROM.minimumShare());
-		emit log_named_uint("min stake", ROM.minimumStake());
-		emit log_named_uint("max  time", ROM.maximumTime());
-	}
+    // log deployment information
+    function testCloneDeployment() public {
+        emit log_named_address("ROM Contract", address(ROM));
+        emit log_named_address("ROM Treasury", ROM.treasury());
+        emit log_named_uint("min share", ROM.minimumShare());
+        emit log_named_uint("min stake", ROM.minimumStake());
+        emit log_named_uint("max  time", ROM.maximumTime());
+    }
 }

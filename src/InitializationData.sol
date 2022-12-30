@@ -3,7 +3,6 @@
 pragma solidity ^0.8.4;
 
 contract InitializationData {
-
     // object is used to initialize new cohorts
     // daoAddress_ the contract address read from in order to ascertain cohort completion
     // tokenAddress_ the contract address for the asset which is staked into the cohort contract
@@ -17,12 +16,14 @@ contract InitializationData {
         address membershipCriteria;
         address stakingAsset;
         address treasury;
+        address topHatWearer;
         uint256 threshold;
         uint256 assetAmount;
         uint256 duration;
+        uint256 chainId;
+        uint256 topHatId;
         string name;
         string symbol;
         string baseUri;
     }
-
 }
