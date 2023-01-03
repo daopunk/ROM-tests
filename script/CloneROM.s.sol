@@ -48,8 +48,6 @@ contract CloneROMScript is Script, InitializationData {
 
         // ROM.checkAdminHat(msg.sender);
 
-        ROM.adminTest(7);
-
         vm.stopBroadcast();
     }
 

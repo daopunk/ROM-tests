@@ -5,8 +5,10 @@ pragma solidity ^0.8.4;
 import "lib/openzeppelin-contracts-upgradeable/contracts/utils/CountersUpgradeable.sol";
 import "lib/openzeppelin-contracts-upgradeable/contracts/token/ERC721/ERC721Upgradeable.sol";
 import "./InitializationData.sol";
-import "./hats/HatsAccessControl.sol";
-import "./hats/IHats.sol";
+// import {IHats} from "./hats/IHats.sol";
+
+// for testing
+import {IHats} from "test/utils/hats/interfaces/IHatsT.sol";
 
 interface MolochDAO {
     struct Member {
@@ -34,16 +36,22 @@ interface Token {
     function transfer(address to, uint256 amount) external returns (bool);
 }
 
-contract RiteOfMoloch is
-    InitializationData,
-    ERC721Upgradeable,
-    HatsAccessControl
-{
+contract RiteOfMoloch is InitializationData, ERC721Upgradeable {
     using CountersUpgradeable for CountersUpgradeable.Counter;
 
+    error NotWearingRoleHat(bytes32 role, uint256 hat, address account);
+    error RoleAlreadyAssigned(bytes32 role, uint256 roleHat);
+
+    struct RoleData {
+        uint256 hat;
+        bytes32 adminRole;
+    }
+
+    mapping(bytes32 => RoleData) public _roles;
+
     // role constants
+    bytes32 public constant SUPER_ADMIN = keccak256("SUPER_ADMIN");
     bytes32 public constant ADMIN = keccak256("ADMIN");
-    bytes32 public constant OPERATOR = keccak256("OPERATOR");
 
     /*************************
      MAPPING STRUCTS EVENTS
@@ -60,28 +68,20 @@ contract RiteOfMoloch is
 
     // logs data when failed initiates get slashed
     event Sacrifice(address sacrifice, uint256 slashedAmount, address slasher);
-
     // logs data when a user successfully claims back their stake
     event Claim(address newMember, uint256 claimAmount);
-
     // log the new staking requirement
     event ChangedStake(uint256 newStake);
-
     // log the new minimum shares for DAO membership
     event ChangedShares(uint256 newShare);
-
     // log the new duration before an initiate can be slashed
     event ChangedTime(uint256 newTime);
-
     // log feedback data on chain for aggregation and graph
     event Feedback(address user, address treasury, string feedback);
-
     // initiation participant token balances
     mapping(address => uint256) internal _staked;
-
     // the time a participant joined the initiation
     mapping(address => uint256) public deadlines;
-
     // the number of user's a member has sacrificed
     mapping(address => uint256) public totalSlash;
 
@@ -93,27 +93,24 @@ contract RiteOfMoloch is
 
     MolochDAO public dao;
     Token private _token;
-
     // cohort's base URI for accessing token metadata
     string internal __baseURI;
-
     // minimum amount of dao shares required to be considered a member
     uint256 public minimumShare;
-
     // minimum amount of staked tokens required to join the initiation
     uint256 public minimumStake;
-
     // maximum length of time for initiates to succeed at joining
     uint256 public maximumTime;
-
     // DAO treasury address
     address public treasury;
 
-    // Hats vars:
-    IHats public Hats;
+    // Hats protocol:
+    IHats public HATS;
+
+    // Hats
     uint256 public topHat;
+    uint256 public superAdminHat;
     uint256 public adminHat;
-    uint256 public operatorHat;
 
     constructor() {
         _disableInitializers();
@@ -131,90 +128,41 @@ contract RiteOfMoloch is
     ) external initializer {
         // increment the counter so our first sbt has token id of one
         _tokenIdCounter.increment();
-
         // initialize the SBT
         __ERC721_init(initData.name, initData.symbol);
-
         // Set the interface for accessing the DAO's public members mapping
         dao = MolochDAO(initData.membershipCriteria);
-
         // Store the treasury daoAddress
         treasury = initData.treasury;
-
         // Set the interface for accessing the required staking token
         _token = Token(initData.stakingAsset);
-
         // Set the minimum shares
         minimumShare = initData.threshold;
 
         // point to Hats Protocol
-        Hats = IHats(hatsProtocol);
+        HATS = IHats(hatsProtocol);
 
         // create/mint Hats
         if (
             initData.topHatWearer != address(0) &&
             initData.topHatId != 0 &&
-            Hats.isWearerOfHat(initData.topHatWearer, initData.topHatId)
+            HATS.isWearerOfHat(initData.topHatWearer, initData.topHatId)
         ) {
             // todo: add logic for existing topHat
+
             return;
         } else {
-            topHat = Hats.mintTopHat(address(this), "ROM TopHat", "");
+            _buildNewHatTree(caller_, initData.additionalAdmin);
         }
 
-        adminHat = Hats.createHat(
-            topHat,
-            "ROM Admin",
-            3,
-            address(this),
-            address(this),
-            true,
-            ""
-        );
-
-        Hats.mintHat(adminHat, caller_);
-
-        _grantRole(ADMIN, topHat);
-
-        // operatorHat = Hats.createHat(
-        //     adminHat,
-        //     "ROM Operator",
-        //     1,
-        //     initData.membershipCriteria,
-        //     initData.membershipCriteria,
-        //     true,
-        //     ""
-        // );
-
-        // // grant roles
-        // _grantRole(DEFAULT_ADMIN_ROLE, caller_);
-        // _grantRole(ADMIN, msg.sender);
-        // _grantRole(OPERATOR, msg.sender);
-
-        // // setup the ADMIN role to manage the OPERATOR role
-        // _setRoleAdmin(OPERATOR, ADMIN);
-
         // set the minimum stake requirement
-        // setMinimumStake(initData.assetAmount);
+        _setMinimumStake(initData.assetAmount);
 
-        // // set the cohort duration in seconds
-        // setMaxDuration(initData.duration);
+        // set the cohort duration in seconds
+        _setMaxDuration(initData.duration);
 
         // set the cohort token's base uri
-        // _setBaseUri(initData.baseUri);
-    }
-
-    function adminTest(uint256 n) external onlyRole(ADMIN) returns (bool) {
-        if (n == 7) return true;
-        else false;
-    }
-
-    function checkTopHat() public returns (bool) {
-        return Hats.isWearerOfHat(address(this), topHat);
-    }
-
-    function checkAdminHat(address c) public returns (bool) {
-        return Hats.isWearerOfHat(c, adminHat);
+        _setBaseUri(initData.baseUri);
     }
 
     /*************************
@@ -239,6 +187,15 @@ contract RiteOfMoloch is
         _;
     }
 
+    /**
+     * @dev Modifier for enforcing Hats protocol
+     * Allows Hats Access Control
+     */
+    modifier onlyRole(bytes32 role) {
+        _checkRole(role);
+        _;
+    }
+
     /*************************
      USER FUNCTIONS
      *************************/
@@ -260,7 +217,10 @@ contract RiteOfMoloch is
      * @dev Claims the life force of failed initiates for the dao
      * @param failedInitiates an array of user's who have failed to join the DAO
      */
-    function sacrifice(address[] calldata failedInitiates) public onlyMember {
+    function sacrifice(address[] calldata failedInitiates)
+        public
+        onlyRole(ADMIN)
+    {
         _darkRitual(failedInitiates);
     }
 
@@ -290,46 +250,26 @@ contract RiteOfMoloch is
      * @dev Allows DAO members to change the staking requirement
      * @param newMinimumStake the minimum quantity of tokens a user must stake to join the cohort
      */
-    // function setMinimumStake(uint256 newMinimumStake) public onlyRole(ADMIN) {
-    function setMinimumStake(uint256 newMinimumStake) public {
-        // enforce that the minimum stake isn't zero
-        require(
-            newMinimumStake > 0,
-            "Minimum stake must be greater than zero!"
-        );
-
-        // set the minimum staking requirement
-        minimumStake = newMinimumStake;
-
-        //  new staking requirement data
-        emit ChangedStake(newMinimumStake);
+    function setMinimumStake(uint256 newMinimumStake) public onlyRole(ADMIN) {
+        _setMinimumStake(newMinimumStake);
     }
 
     /**
      * @dev Allows changing the maximum initiation duration
      * @param newMaxTime the length in seconds until an initiate's stake is forfeit
      */
-    // function setMaxDuration(uint256 newMaxTime) public onlyRole(OPERATOR) {
-    function setMaxDuration(uint256 newMaxTime) public {
-        // enforce that the minimum time is greater than 1 week
-        require(newMaxTime > 0, "Minimum duration must be greater than 0!");
-
-        // set the maximum length of time for initiations
-        maximumTime = newMaxTime;
-
-        // log the new duration before stakes can be slashed
-        emit ChangedTime(newMaxTime);
+    function setMaxDuration(uint256 newMaxTime) public onlyRole(SUPER_ADMIN) {
+        _setMaxDuration(newMaxTime);
     }
 
     /**
      * @dev Allows changing the DAO member share threshold
      * @param newShareThreshold the number of shares required to be considered a DAO member
      */
-    // function setShareThreshold(uint256 newShareThreshold)
-    //     public
-    //     onlyRole(ADMIN)
-    // {
-    function setShareThreshold(uint256 newShareThreshold) public {
+    function setShareThreshold(uint256 newShareThreshold)
+        public
+        onlyRole(ADMIN)
+    {
         // enforce that the minimum share threshold isn't zero
         require(
             newShareThreshold > 0,
@@ -347,11 +287,36 @@ contract RiteOfMoloch is
      PRIVATE OR INTERNAL
      *************************/
 
+    function _setMinimumStake(uint256 newMinimumStake) internal {
+        // enforce that the minimum stake isn't zero
+        require(
+            newMinimumStake > 0,
+            "Minimum stake must be greater than zero!"
+        );
+
+        // set the minimum staking requirement
+        minimumStake = newMinimumStake;
+
+        //  new staking requirement data
+        emit ChangedStake(newMinimumStake);
+    }
+
+    function _setMaxDuration(uint256 newMaxTime) internal virtual {
+        // enforce that the minimum time is greater than 1 week
+        require(newMaxTime > 0, "Minimum duration must be greater than 0!");
+
+        // set the maximum length of time for initiations
+        maximumTime = newMaxTime;
+
+        // log the new duration before stakes can be slashed
+        emit ChangedTime(newMaxTime);
+    }
+
     /**
      * @dev Sets base URI during initialization
      * @param baseURI the base uri for accessing token metadata
      */
-    function _setBaseUri(string calldata baseURI) internal {
+    function _setBaseUri(string calldata baseURI) internal virtual {
         __baseURI = baseURI;
     }
 
@@ -476,6 +441,54 @@ contract RiteOfMoloch is
         require(shares >= minimumShare, "You must be a member!");
     }
 
+    /**
+     * @dev Creates a new topHat, build Access Control tree,
+     * and transfers topHat to DAO
+     */
+    function _buildNewHatTree(address _deployer, uint32 _additionalAdmin)
+        internal
+        virtual
+    {
+        topHat = HATS.mintTopHat(address(this), "ROM TopHat", "");
+
+        // super-admin privileges: grant/revoke other admin, access control
+        superAdminHat = HATS.createHat(
+            topHat,
+            "ROM Super-Admin",
+            1,
+            address(dao),
+            address(dao),
+            true,
+            ""
+        );
+
+        // admin privileges: access control
+        // 1 hat for address(this) + additional hats for number of admin
+        adminHat = HATS.createHat(
+            superAdminHat,
+            "ROM Admin",
+            _additionalAdmin + 1,
+            _deployer,
+            _deployer,
+            true,
+            ""
+        );
+
+        /**
+         * @dev Mint superAdmin & admin hats to Deployer
+         * DAO can grant/revoke superAdmin (after topHat is transferred below)
+         * Deployer can grant/revoke other admin
+         */
+        HATS.mintHat(superAdminHat, _deployer);
+        HATS.mintHat(adminHat, _deployer);
+
+        // grant Hat Access Control roles
+        _grantRole(SUPER_ADMIN, superAdminHat);
+        _grantRole(ADMIN, adminHat);
+
+        HATS.transferHat(topHat, address(this), address(dao));
+    }
+
     /*************************
      VIEW AND PURE FUNCTIONS
      *************************/
@@ -529,5 +542,65 @@ contract RiteOfMoloch is
         returns (bool)
     {
         return super.supportsInterface(interfaceId);
+    }
+
+    /*************************
+     HATS FUNCTIONALITY
+     *************************/
+
+    /**
+     * @dev Hats Access Control public functions
+     */
+
+    function hasRole(bytes32 role, address account) public view returns (bool) {
+        return HATS.isWearerOfHat(account, _roles[role].hat);
+    }
+
+    function getRoleAdmin(bytes32 role) public view returns (bytes32) {
+        return _roles[role].adminRole;
+    }
+
+    function grantRole(bytes32 role, uint256 hat)
+        public
+        onlyRole(getRoleAdmin(role))
+    {
+        _grantRole(role, hat);
+    }
+
+    function revokeRole(bytes32 role, uint256 hat)
+        public
+        onlyRole(getRoleAdmin(role))
+    {
+        _revokeRole(role, hat);
+    }
+
+    /**
+     * @dev Hats Access Control internal functions
+     */
+
+    function _checkRole(bytes32 role) internal view {
+        _checkRole(role, _msgSender());
+    }
+
+    function _checkRole(bytes32 role, address account) internal view {
+        if (!hasRole(role, account)) {
+            revert NotWearingRoleHat(role, _roles[role].hat, account);
+        }
+    }
+
+    function _grantRole(bytes32 role, uint256 hat) internal {
+        uint256 roleHat = _roles[role].hat;
+        if (roleHat > 0) {
+            revert RoleAlreadyAssigned(role, roleHat);
+        }
+        if (roleHat != hat) {
+            _roles[role].hat = hat;
+        }
+    }
+
+    function _revokeRole(bytes32 role, uint256 hat) internal {
+        if (_roles[role].hat == hat) {
+            _roles[role].hat = 0;
+        }
     }
 }

@@ -22,6 +22,7 @@ contract InitializationData {
         uint256 duration;
         uint256 chainId;
         uint256 topHatId;
+        uint32 additionalAdmin;
         string name;
         string symbol;
         string baseUri;
