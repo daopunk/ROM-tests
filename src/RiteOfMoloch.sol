@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// @author st4rgard3n, bitbeckers, MrDeadce11 / Raid Guild
+// @author st4rgard3n, bitbeckers, MrDeadce11, huntrr / Raid Guild
 pragma solidity ^0.8.4;
 
 import "lib/openzeppelin-contracts-upgradeable/contracts/utils/CountersUpgradeable.sol";
