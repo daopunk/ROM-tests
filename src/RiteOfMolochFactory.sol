@@ -7,6 +7,7 @@ import "lib/openzeppelin-contracts/contracts/access/AccessControl.sol";
 import "src/RiteOfMoloch.sol";
 import "./InitializationData.sol";
 
+// todo: Hats Access Control?
 contract RiteOfMolochFactory is InitializationData, AccessControl {
     bytes32 public constant ADMIN = keccak256("ADMIN");
 

@@ -38,7 +38,6 @@ interface Token {
     function transfer(address to, uint256 amount) external returns (bool);
 }
 
-//  HatsAccessControl
 contract RiteOfMoloch is
     InitializationData,
     ERC721Upgradeable,
