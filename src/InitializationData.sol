@@ -17,12 +17,13 @@ contract InitializationData {
         address stakingAsset;
         address treasury;
         address topHatWearer;
+        address admin1;
+        address admin2;
         uint256 threshold;
         uint256 assetAmount;
         uint256 duration;
         uint256 chainId;
         uint256 topHatId;
-        uint32 additionalAdmin;
         string name;
         string symbol;
         string baseUri;

@@ -5,7 +5,9 @@ pragma solidity ^0.8.4;
 import "lib/openzeppelin-contracts-upgradeable/contracts/utils/CountersUpgradeable.sol";
 import "lib/openzeppelin-contracts-upgradeable/contracts/token/ERC721/ERC721Upgradeable.sol";
 import "./InitializationData.sol";
-// import {IHats} from "./hats/IHats.sol";
+import "src/hats/HatsAccessControl.sol";
+
+// import {IHats} from "src/hats/IHats.sol";
 
 // for testing
 import {IHats} from "test/utils/hats/interfaces/IHatsT.sol";
@@ -36,16 +38,13 @@ interface Token {
     function transfer(address to, uint256 amount) external returns (bool);
 }
 
-contract RiteOfMoloch is InitializationData, ERC721Upgradeable {
+//  HatsAccessControl
+contract RiteOfMoloch is
+    InitializationData,
+    ERC721Upgradeable,
+    HatsAccessControl
+{
     using CountersUpgradeable for CountersUpgradeable.Counter;
-
-    error NotWearingRoleHat(bytes32 role, uint256 hat, address account);
-    error RoleAlreadyAssigned(bytes32 role, uint256 roleHat);
-
-    struct RoleData {
-        uint256 hat;
-        bytes32 adminRole;
-    }
 
     mapping(bytes32 => RoleData) public _roles;
 
@@ -68,20 +67,28 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable {
 
     // logs data when failed initiates get slashed
     event Sacrifice(address sacrifice, uint256 slashedAmount, address slasher);
+
     // logs data when a user successfully claims back their stake
     event Claim(address newMember, uint256 claimAmount);
+
     // log the new staking requirement
     event ChangedStake(uint256 newStake);
+
     // log the new minimum shares for DAO membership
     event ChangedShares(uint256 newShare);
+
     // log the new duration before an initiate can be slashed
     event ChangedTime(uint256 newTime);
+
     // log feedback data on chain for aggregation and graph
     event Feedback(address user, address treasury, string feedback);
+
     // initiation participant token balances
     mapping(address => uint256) internal _staked;
+
     // the time a participant joined the initiation
     mapping(address => uint256) public deadlines;
+
     // the number of user's a member has sacrificed
     mapping(address => uint256) public totalSlash;
 
@@ -92,15 +99,21 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable {
     CountersUpgradeable.Counter internal _tokenIdCounter;
 
     MolochDAO public dao;
+
     Token private _token;
+
     // cohort's base URI for accessing token metadata
     string internal __baseURI;
+
     // minimum amount of dao shares required to be considered a member
     uint256 public minimumShare;
+
     // minimum amount of staked tokens required to join the initiation
     uint256 public minimumStake;
+
     // maximum length of time for initiates to succeed at joining
     uint256 public maximumTime;
+
     // DAO treasury address
     address public treasury;
 
@@ -128,19 +141,27 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable {
     ) external initializer {
         // increment the counter so our first sbt has token id of one
         _tokenIdCounter.increment();
+
         // initialize the SBT
         __ERC721_init(initData.name, initData.symbol);
+
         // Set the interface for accessing the DAO's public members mapping
         dao = MolochDAO(initData.membershipCriteria);
+
         // Store the treasury daoAddress
         treasury = initData.treasury;
+
         // Set the interface for accessing the required staking token
         _token = Token(initData.stakingAsset);
+
         // Set the minimum shares
         minimumShare = initData.threshold;
 
         // point to Hats Protocol
         HATS = IHats(hatsProtocol);
+
+        // point access control functionality to Hats protocol
+        _changeHatsContract(hatsProtocol);
 
         // create/mint Hats
         if (
@@ -152,7 +173,7 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable {
 
             return;
         } else {
-            _buildNewHatTree(caller_, initData.additionalAdmin);
+            _buildNewHatTree(caller_, initData.admin1, initData.admin2);
         }
 
         // set the minimum stake requirement
@@ -184,15 +205,6 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable {
      */
     modifier onlyMember() {
         _checkMember();
-        _;
-    }
-
-    /**
-     * @dev Modifier for enforcing Hats protocol
-     * Allows Hats Access Control
-     */
-    modifier onlyRole(bytes32 role) {
-        _checkRole(role);
         _;
     }
 
@@ -445,10 +457,11 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable {
      * @dev Creates a new topHat, build Access Control tree,
      * and transfers topHat to DAO
      */
-    function _buildNewHatTree(address _deployer, uint32 _additionalAdmin)
-        internal
-        virtual
-    {
+    function _buildNewHatTree(
+        address _deployer,
+        address _admin1,
+        address _admin2
+    ) internal virtual {
         topHat = HATS.mintTopHat(address(this), "ROM TopHat", "");
 
         // super-admin privileges: grant/revoke other admin, access control
@@ -467,7 +480,7 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable {
         adminHat = HATS.createHat(
             superAdminHat,
             "ROM Admin",
-            _additionalAdmin + 1,
+            3,
             _deployer,
             _deployer,
             true,
@@ -481,6 +494,13 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable {
          */
         HATS.mintHat(superAdminHat, _deployer);
         HATS.mintHat(adminHat, _deployer);
+
+        if (_admin1 != address(0)) {
+            HATS.mintHat(adminHat, _admin1);
+        }
+        if (_admin2 != address(0)) {
+            HATS.mintHat(adminHat, _admin2);
+        }
 
         // grant Hat Access Control roles
         _grantRole(SUPER_ADMIN, superAdminHat);
@@ -542,65 +562,5 @@ contract RiteOfMoloch is InitializationData, ERC721Upgradeable {
         returns (bool)
     {
         return super.supportsInterface(interfaceId);
-    }
-
-    /*************************
-     HATS FUNCTIONALITY
-     *************************/
-
-    /**
-     * @dev Hats Access Control public functions
-     */
-
-    function hasRole(bytes32 role, address account) public view returns (bool) {
-        return HATS.isWearerOfHat(account, _roles[role].hat);
-    }
-
-    function getRoleAdmin(bytes32 role) public view returns (bytes32) {
-        return _roles[role].adminRole;
-    }
-
-    function grantRole(bytes32 role, uint256 hat)
-        public
-        onlyRole(getRoleAdmin(role))
-    {
-        _grantRole(role, hat);
-    }
-
-    function revokeRole(bytes32 role, uint256 hat)
-        public
-        onlyRole(getRoleAdmin(role))
-    {
-        _revokeRole(role, hat);
-    }
-
-    /**
-     * @dev Hats Access Control internal functions
-     */
-
-    function _checkRole(bytes32 role) internal view {
-        _checkRole(role, _msgSender());
-    }
-
-    function _checkRole(bytes32 role, address account) internal view {
-        if (!hasRole(role, account)) {
-            revert NotWearingRoleHat(role, _roles[role].hat, account);
-        }
-    }
-
-    function _grantRole(bytes32 role, uint256 hat) internal {
-        uint256 roleHat = _roles[role].hat;
-        if (roleHat > 0) {
-            revert RoleAlreadyAssigned(role, roleHat);
-        }
-        if (roleHat != hat) {
-            _roles[role].hat = hat;
-        }
-    }
-
-    function _revokeRole(bytes32 role, uint256 hat) internal {
-        if (_roles[role].hat == hat) {
-            _roles[role].hat = 0;
-        }
     }
 }

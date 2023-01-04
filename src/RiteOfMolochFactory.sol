@@ -4,7 +4,7 @@ pragma solidity ^0.8.4;
 
 import "lib/openzeppelin-contracts/contracts/proxy/Clones.sol";
 import "lib/openzeppelin-contracts/contracts/access/AccessControl.sol";
-import "./RiteOfMoloch.sol";
+import "src/RiteOfMoloch.sol";
 import "./InitializationData.sol";
 
 contract RiteOfMolochFactory is InitializationData, AccessControl {

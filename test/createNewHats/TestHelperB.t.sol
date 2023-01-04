@@ -2,13 +2,16 @@
 pragma solidity ^0.8.4;
 
 import "forge-std/Test.sol";
+
+// import "src/inheritedSetup/RiteOfMoloch2.sol";
 import "src/RiteOfMoloch.sol";
+
 import "src/RiteOfMolochFactory.sol";
 import "src/InitializationData.sol";
 import "test/utils/TestToken.sol";
 import {Hats} from "test/utils/hats/HatsT.sol";
 
-// forge test --match-contract TestHelper -vv
+// forge test --match-contract TestHelperB -vv
 
 contract TestHelperB is Test, InitializationData {
     event Log(string message);
@@ -55,12 +58,13 @@ contract TestHelperB is Test, InitializationData {
         Data.stakingAsset = address(daoToken);
         Data.treasury = dao;
         Data.topHatWearer = address(0);
+        Data.admin1 = alice;
+        Data.admin2 = address(0);
         Data.threshold = 10;
         Data.assetAmount = 10;
         Data.duration = 10;
         Data.chainId = 5;
         Data.topHatId = 0;
-        Data.additionalAdmin = 2;
         Data.name = "RiteOfMolochSBT";
         Data.symbol = "SBTMoloch";
         Data.baseUri = "";

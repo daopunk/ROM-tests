@@ -10,7 +10,7 @@ contract AccessControlB is TestHelperB {
     bytes32 public constant SUPER_ADMIN = keccak256("SUPER_ADMIN");
     bytes32 public constant ADMIN = keccak256("ADMIN");
 
-    function testSuperAdmin() public {
+    function testSuperAdminPermissions() public {
         vm.startPrank(deployer);
         ROM.setMinimumStake(20);
         ROM.setShareThreshold(20);
@@ -21,13 +21,9 @@ contract AccessControlB is TestHelperB {
         vm.stopPrank();
     }
 
-    function testSetAdmin() public {
+    function testSetAdminPermissions() public {
         uint256 adminHat = ROM.adminHat();
         uint256 superAdminHat = ROM.superAdminHat();
-
-        // mint admin hats to alice and bob
-        hats.mintHat(adminHat, alice);
-        assertTrue(ROM.hasRole(ADMIN, alice));
 
         hats.mintHat(adminHat, bob);
         assertTrue(ROM.hasRole(ADMIN, bob));
@@ -72,7 +68,6 @@ contract AccessControlB is TestHelperB {
     function testSetAdminLimit() public {
         uint256 adminHat = ROM.adminHat();
 
-        hats.mintHat(adminHat, alice);
         hats.mintHat(adminHat, bob);
 
         // all hats have been minted, next hat [for charlie] should revert
@@ -82,5 +77,19 @@ contract AccessControlB is TestHelperB {
         hats.mintHat(adminHat, charlie);
     }
 
-    function testHatAssignments() public {}
+    function testDoubleMintGuard() public {
+        uint256 adminHat = ROM.adminHat();
+
+        // alice already has a admin hat
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                HatsErrorsT.AlreadyWearingHat.selector,
+                alice,
+                adminHat
+            )
+        );
+        hats.mintHat(adminHat, alice);
+    }
+
+    // function testHatAssignments() public {}
 }
